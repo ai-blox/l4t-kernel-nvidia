@@ -1,6 +1,8 @@
 /*
  * max9295.c - max9295 GMSL Serializer driver
  *
+ * Copyright (c) 2020, Leopard Imaging Inc.  All rights reserved.
+ *
  * Copyright (c) 2018-2020, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -113,7 +115,13 @@ struct max9295 {
 	__u32 pst2_ref;
 };
 
-static struct max9295 *prim_priv__;
+//static struct max9295 *prim_priv__;
+#define MAX_CHANNEL_NUM 4
+
+/* count channel,the max MAX_CHANNEL_NUM*/
+static __u32 channel_count_leopard;
+
+static struct max9295 *prim_priv__[MAX_CHANNEL_NUM];
 
 struct map_ctx {
 	u8 dt;
@@ -122,11 +130,23 @@ struct map_ctx {
 	u8 st_id;
 };
 
+static int max9295_read_reg(struct device *dev, u16 addr, u8 *val)
+{
+	int err = 0;
+	u32 reg_val = 0;
+	struct max9295 *priv = dev_get_drvdata(dev);
+	err = regmap_read(priv->regmap, addr, &reg_val);
+	*val = reg_val & 0xFF;
+	//printk("max9295-read-addr = %x, val = %x\n", addr, *val);
+	return err;
+}
+
 static int max9295_write_reg(struct device *dev, u16 addr, u8 val)
 {
 	struct max9295 *priv = dev_get_drvdata(dev);
 	int err;
-
+	u8 e;
+	//printk("max9295-write-addr = %x, val = %x\n", addr, val);
 	err = regmap_write(priv->regmap, addr, val);
 	if (err)
 		dev_err(dev, "%s:i2c write failed, 0x%x = %x\n",
@@ -134,7 +154,8 @@ static int max9295_write_reg(struct device *dev, u16 addr, u8 val)
 
 	/* delay before next i2c command as required for SERDES link */
 	usleep_range(100, 110);
-
+	max9295_read_reg(dev, addr, &e);
+	usleep_range(100, 110);
 	return err;
 }
 
@@ -165,7 +186,6 @@ int max9295_setup_streaming(struct device *dev)
 	};
 
 	mutex_lock(&priv->lock);
-
 	if (!priv->g_client.g_ctx) {
 		dev_err(dev, "%s: no sdev client found\n", __func__);
 		err = -EINVAL;
@@ -263,6 +283,10 @@ int max9295_setup_streaming(struct device *dev)
 
 	max9295_write_reg(dev, MAX9295_START_PIPE_ADDR, st_pipe);
 	max9295_write_reg(dev, MAX9295_CSI_PORT_SEL_ADDR, port_sel);
+
+	max9295_write_reg(dev, 0x02D8, 0x10);
+	max9295_write_reg(dev, 0x02D6, 0x04);
+
 	max9295_write_reg(dev, MAX9295_PIPE_EN_ADDR, pipe_en);
 
 	priv->g_client.st_done = true;
@@ -302,7 +326,6 @@ int max9295_setup_control(struct device *dev)
 	};
 
 	mutex_lock(&priv->lock);
-
 	if (!priv->g_client.g_ctx) {
 		dev_err(dev, "%s: no sensor dev client found\n", __func__);
 		err = -EINVAL;
@@ -311,11 +334,10 @@ int max9295_setup_control(struct device *dev)
 
 	g_ctx = priv->g_client.g_ctx;
 
-	if (prim_priv__) {
-		/* update address reassingment */
-		max9295_write_reg(&prim_priv__->i2c_client->dev,
-				MAX9295_DEV_ADDR, (g_ctx->ser_reg << 1));
-	}
+	/* update address reassingment */
+	//max9295_write_reg(&prim_priv__->i2c_client->dev,
+	max9295_write_reg(&prim_priv__[g_ctx->reg_mux]->i2c_client->dev,
+			MAX9295_DEV_ADDR, (g_ctx->ser_reg << 1));
 
 	if (g_ctx->serdes_csi_link == GMSL_SERDES_CSI_LINK_A)
 		err = max9295_write_reg(dev, MAX9295_CTRL0_ADDR, 0x21);
@@ -350,15 +372,16 @@ int max9295_setup_control(struct device *dev)
 		i2c_ovrd[i+1] += (i < 4) ? offset1 : offset2;
 
 		/* i2c passthrough2 must be configured once for all devices */
-		if ((i2c_ovrd[i] == 0x8B) && prim_priv__ && prim_priv__->pst2_ref)
+		//if ((i2c_ovrd[i] == 0x8B) && prim_priv__->pst2_ref)
+		if ((i2c_ovrd[i] == 0x8B) && prim_priv__[g_ctx->reg_mux]->pst2_ref)
 			continue;
 
 		max9295_write_reg(dev, i2c_ovrd[i], i2c_ovrd[i+1]);
 	}
 
 	/* dev addr pass-through2 ref */
-	if (prim_priv__)
-		prim_priv__->pst2_ref++;
+	//prim_priv__->pst2_ref++;
+	prim_priv__[g_ctx->reg_mux]->pst2_ref++;
 
 	max9295_write_reg(dev, MAX9295_I2C4_ADDR, (g_ctx->sdev_reg << 1));
 	max9295_write_reg(dev, MAX9295_I2C5_ADDR, (g_ctx->sdev_def << 1));
@@ -386,17 +409,15 @@ int max9295_reset_control(struct device *dev)
 		err = -EINVAL;
 		goto error;
 	}
-
+	//prim_priv__->pst2_ref--;
+	prim_priv__[priv->g_client.g_ctx->reg_mux]->pst2_ref--;
 	priv->g_client.st_done = false;
 
-	if (prim_priv__) {
-		prim_priv__->pst2_ref--;
-
-		max9295_write_reg(dev, MAX9295_DEV_ADDR, (prim_priv__->def_addr << 1));
-
-		max9295_write_reg(&prim_priv__->i2c_client->dev,
-					MAX9295_CTRL0_ADDR, MAX9295_RESET_ALL);
-	}
+	//max9295_write_reg(dev, MAX9295_DEV_ADDR, (prim_priv__->def_addr << 1));
+	max9295_write_reg(dev, MAX9295_DEV_ADDR, (prim_priv__[priv->g_client.g_ctx->reg_mux]->def_addr << 1));
+	//max9295_write_reg(&prim_priv__->i2c_client->dev,
+	max9295_write_reg(&prim_priv__[priv->g_client.g_ctx->reg_mux]->i2c_client->dev,
+				MAX9295_CTRL0_ADDR, MAX9295_RESET_ALL);
 
 error:
 	mutex_unlock(&priv->lock);
@@ -421,7 +442,6 @@ int max9295_sdev_pair(struct device *dev, struct gmsl_link_ctx *g_ctx)
 		err = -EINVAL;
 		goto error;
 	}
-
 	priv->g_client.st_done = false;
 
 	priv->g_client.g_ctx = g_ctx;
@@ -495,7 +515,8 @@ static int max9295_probe(struct i2c_client *client,
 	mutex_init(&priv->lock);
 
 	if (of_get_property(node, "is-prim-ser", NULL)) {
-		if (prim_priv__) {
+		//if (prim_priv__) {
+		if (prim_priv__[channel_count_leopard] && channel_count_leopard >= MAX_CHANNEL_NUM) {
 			dev_err(&client->dev,
 				"prim-ser already exists\n");
 				return -EEXIST;
@@ -507,7 +528,10 @@ static int max9295_probe(struct i2c_client *client,
 			return -EINVAL;
 		}
 
-		prim_priv__ = priv;
+		//prim_priv__ = priv;
+		prim_priv__[channel_count_leopard] = priv;
+		channel_count_leopard++;
+
 	}
 
 	dev_set_drvdata(&client->dev, priv);
@@ -521,6 +545,9 @@ static int max9295_probe(struct i2c_client *client,
 static int max9295_remove(struct i2c_client *client)
 {
 	struct max9295 *priv;
+
+	if (channel_count_leopard > 0)
+		channel_count_leopard--;
 
 	if (client != NULL) {
 		priv = dev_get_drvdata(&client->dev);
