@@ -1,6 +1,8 @@
 /*
  * max9296.c - max9296 GMSL Deserializer driver
  *
+ * Copyright (c) 2020, Leopard Imaging Inc.  All rights reserved.
+ *
  * Copyright (c) 2018-2020, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -126,12 +128,23 @@ struct max9296 {
 	struct regulator *vdd_cam_1v2;
 };
 
+static int max9296_read_reg(struct device *dev, u16 addr, u8 *val)
+{
+	int err = 0;
+	u32 reg_val = 0;
+	struct max9296 *priv = dev_get_drvdata(dev);
+	err = regmap_read(priv->regmap, addr, &reg_val);
+	*val = reg_val & 0xFF;
+	//printk("max9296-read-addr = %x, val = %x\n", addr, *val);
+	return err;
+}
+
 static int max9296_write_reg(struct device *dev,
 	u16 addr, u8 val)
 {
 	struct max9296 *priv;
 	int err;
-
+	u8 e;
 	priv = dev_get_drvdata(dev);
 
 	err = regmap_write(priv->regmap, addr, val);
@@ -142,7 +155,8 @@ static int max9296_write_reg(struct device *dev,
 
 	/* delay before next i2c command as required for SERDES link */
 	usleep_range(100, 110);
-
+	max9296_read_reg(dev, addr, &e);
+	usleep_range(100, 110);
 	return err;
 }
 
@@ -220,10 +234,9 @@ int max9296_power_on(struct device *dev)
 	if (priv->pw_ref == 0) {
 		usleep_range(1, 2);
 		if (priv->reset_gpio)
-			gpio_set_value(priv->reset_gpio, 0);
+			gpio_direction_output(priv->reset_gpio, 0);
 
-		usleep_range(30, 50);
-
+		usleep_range(50, 80);
 		if (priv->vdd_cam_1v2) {
 			err = regulator_enable(priv->vdd_cam_1v2);
 			if (unlikely(err))
@@ -234,14 +247,15 @@ int max9296_power_on(struct device *dev)
 
 		/*exit reset mode: XCLR */
 		if (priv->reset_gpio) {
-			gpio_set_value(priv->reset_gpio, 0);
-			usleep_range(30, 50);
-			gpio_set_value(priv->reset_gpio, 1);
-			usleep_range(30, 50);
+			gpio_direction_output(priv->reset_gpio, 0);
+			usleep_range(50, 80);
+			msleep(1000);
+			gpio_direction_output(priv->reset_gpio, 1);
+			usleep_range(50, 80);
 		}
 
 		/* delay to settle reset */
-		msleep(20);
+		msleep(2000);
 	}
 
 	priv->pw_ref++;
@@ -263,7 +277,7 @@ void max9296_power_off(struct device *dev)
 		/* enter reset mode: XCLR */
 		usleep_range(1, 2);
 		if (priv->reset_gpio)
-			gpio_set_value(priv->reset_gpio, 0);
+			gpio_direction_output(priv->reset_gpio, 0);
 
 		if (priv->vdd_cam_1v2)
 			regulator_disable(priv->vdd_cam_1v2);
@@ -355,8 +369,7 @@ int max9296_setup_control(struct device *dev, struct device *s_dev)
 		msleep(100);
 	}
 
-	max9296_write_reg(dev,
-			MAX9296_PWDN_PHYS_ADDR, MAX9296_ALLPHYS_NOSTDBY);
+	max9296_write_reg(dev, MAX9296_PWDN_PHYS_ADDR, MAX9296_ALLPHYS_NOSTDBY);
 
 	priv->sdev_ref++;
 
@@ -767,6 +780,10 @@ int max9296_setup_streaming(struct device *dev, struct device *s_dev)
 
 		priv->lane_setup = true;
 	}
+
+	max9296_write_reg(dev, 0x0005, 0x00);
+	max9296_write_reg(dev, 0x02B0, 0x83);
+	max9296_write_reg(dev, 0x02B1, 0x10);
 
 	priv->sources[i].st_enabled = true;
 
