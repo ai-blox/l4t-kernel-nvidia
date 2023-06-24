@@ -50,6 +50,7 @@
 #define GMSL_SERDES_CSI_LINK_B 0x2
 
 /* Didn't find kernel defintions, for now adding here */
+#define GMSL_CSI_DT_RAW_10 0x2B
 #define GMSL_CSI_DT_RAW_12 0x2C
 #define GMSL_CSI_DT_UED_U1 0x30
 #define GMSL_CSI_DT_EMBED 0x12
@@ -89,6 +90,7 @@ struct gmsl_link_ctx {
 	__u32 ser_reg;          /**< Serializer slave address. */
 	__u32 sdev_reg;         /**< Sensor proxy slave address. */
 	__u32 sdev_def;         /**< Sensor default slave address. */
+	__u32 reg_mux;
 	bool serdev_found;      /**< Indicates whether the serializer device for
                              the specified sensor source was found. Set by
                              the serializer driver during setup; used by

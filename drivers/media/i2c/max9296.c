@@ -1,7 +1,7 @@
 /*
  * max9296.c - max9296 GMSL Deserializer driver
  *
- * Copyright (c) 2018-2020, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2018-2021, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
+#define DEBUG 1
 #include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -65,7 +65,7 @@
 #define MAX9296_ALLPHYS_NOSTDBY 0xF0
 #define MAX9296_ST_ID_SEL_INVALID 0xF
 
-#define MAX9296_PHY1_CLK 0x2C
+#define MAX9296_PHY1_CLK 0x34
 
 #define MAX9296_RESET_ALL 0x80
 
@@ -133,7 +133,7 @@ static int max9296_write_reg(struct device *dev,
 	int err;
 
 	priv = dev_get_drvdata(dev);
-
+dev_info(dev, "%s: addr : %d  val : %d\n", __func__, addr, val);
 	err = regmap_write(priv->regmap, addr, val);
 	if (err)
 		dev_err(dev,
@@ -179,10 +179,10 @@ static void max9296_pipes_reset(struct max9296 *priv)
 	 * for other combinations and requirements.
 	 */
 	struct pipe_ctx pipe_defaults[] = {
-		{MAX9296_PIPE_X, GMSL_CSI_DT_RAW_12,
-			MAX9296_CSI_CTRL_1, 0, MAX9296_INVAL_ST_ID},
-		{MAX9296_PIPE_Y, GMSL_CSI_DT_RAW_12,
-			MAX9296_CSI_CTRL_1, 0, MAX9296_INVAL_ST_ID},
+		{MAX9296_PIPE_X, GMSL_CSI_DT_RAW_10,
+			MAX9296_CSI_CTRL_1, 0, MAX9296_RESET_ST_ID},
+		{MAX9296_PIPE_Y, GMSL_CSI_DT_RAW_10,
+			MAX9296_CSI_CTRL_1, 0, MAX9296_RESET_ST_ID},
 		{MAX9296_PIPE_Z, GMSL_CSI_DT_EMBED,
 			MAX9296_CSI_CTRL_1, 0, MAX9296_INVAL_ST_ID},
 		{MAX9296_PIPE_U, GMSL_CSI_DT_EMBED,
@@ -349,6 +349,7 @@ int max9296_setup_control(struct device *dev, struct device *s_dev)
 		(priv->num_src_found > 0U) &&
 		(priv->splitter_enabled == false)) {
 		max9296_write_reg(dev, MAX9296_CTRL0_ADDR, 0x03);
+		msleep(100);
 		max9296_write_reg(dev, MAX9296_CTRL0_ADDR, 0x23);
 
 		priv->splitter_enabled = true;
@@ -531,6 +532,7 @@ static int max9296_get_available_pipe(struct device *dev,
 		 * be extended as count for many to 1 mapping. Would also need
 		 * few more checks such as input stream id select, dst port etc.
 		 */
+
 		if ((priv->pipe[i].dt_type == st_data_type) &&
 			((dst_csi_port == GMSL_CSI_PORT_A) ?
 				(priv->pipe[i].dst_csi_ctrl ==
@@ -584,6 +586,18 @@ static int max9296_setup_pipeline(struct device *dev,
 			{MAX9296_PIPE_X_DST_2_MAP_ADDR, 0x01},
 		};
 
+		struct reg_pair map_pipe_raw10[] = {
+			/* addr, val */
+			{MAX9296_TX11_PIPE_X_EN_ADDR, 0x7},
+			{MAX9296_TX45_PIPE_X_DST_CTRL_ADDR, 0x15},
+			{MAX9296_PIPE_X_SRC_0_MAP_ADDR, 0x2B},
+			{MAX9296_PIPE_X_DST_0_MAP_ADDR, 0x2B},
+			{MAX9296_PIPE_X_SRC_1_MAP_ADDR, 0x00},
+			{MAX9296_PIPE_X_DST_1_MAP_ADDR, 0x00},
+			{MAX9296_PIPE_X_SRC_2_MAP_ADDR, 0x01},
+			{MAX9296_PIPE_X_DST_2_MAP_ADDR, 0x01},
+		};
+
 		/* Base data type mapping: pipeX/EMBED/CSICNTR1 */
 		struct reg_pair map_pipe_embed[] = {
 			/* addr, val */
@@ -611,6 +625,9 @@ static int max9296_setup_pipeline(struct device *dev,
 				"%s: No mapping for GMSL_CSI_DT_UED_U1\n",
 				__func__);
 			continue;
+		} else if (g_stream->st_data_type == GMSL_CSI_DT_RAW_10) {
+			map_list = map_pipe_raw10;
+			arr_sz = ARRAY_SIZE(map_pipe_raw10);
 		} else {
 			dev_err(dev, "%s: Invalid data type\n", __func__);
 			return -EINVAL;
@@ -637,7 +654,7 @@ static int max9296_setup_pipeline(struct device *dev,
 		if (g_stream->st_id_sel == GMSL_ST_ID_UNUSED) {
 			dev_err(dev, "%s: Invalid stream st_id_sel\n",
 				__func__);
-			return -EINVAL;
+			//return -EINVAL;
 		}
 
 		g_stream->des_pipe = MAX9296_PIPE_X_ST_SEL_ADDR + pipe_id;
@@ -948,5 +965,5 @@ module_init(max9296_init);
 module_exit(max9296_exit);
 
 MODULE_DESCRIPTION("Dual GMSL Deserializer driver max9296");
-MODULE_AUTHOR("Sudhir Vyas <svyas@nvidia.com");
+MODULE_AUTHOR("Leopard Imaging Inc.");
 MODULE_LICENSE("GPL v2");

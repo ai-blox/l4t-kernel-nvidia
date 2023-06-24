@@ -165,6 +165,17 @@ config VIDEO_IMX390
 	  To compile this driver as a module, choose M here: the module
 	  will be called imx390.
 
+config VIDEO_AR0234
+	tristate "AR0234 camera sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API && I2C_IOEXPANDER_SER_MAX9295 && I2C_IOEXPANDER_DESER_MAX9296
+	---help---
+	  This is a Video4Linux2 sensor-level driver for the Sony
+	  AR0234 camera sensor
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called ar0234.
+
+
 endmenu
 
 endif
